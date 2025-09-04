@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebP → PNG 変換（ローカル実行・ドラッグ＆ドロップ対応）</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111821;
+      --muted: #7b8a9a;
+      --text: #e8eef6;
+      --accent: #4da3ff;
+      --ok: #2ec27e;
+      --warn: #ffb86b;
+      --err: #ff6b6b;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      color: var(--text); background: radial-gradient(1200px 800px at 20% -10%, #0e1621 0%, var(--bg) 50%);
+    }
+    header { max-width: 1000px; margin: 32px auto 16px; padding: 0 16px; }
+    h1 { font-size: clamp(22px, 2.2vw, 32px); margin: 0 0 6px; letter-spacing: .2px; }
+    p.lead { margin: 0; color: var(--muted); }
+
+    .panel {
+      max-width: 1000px; margin: 16px auto; padding: 16px; border-radius: var(--radius); background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+      border: 1px solid rgba(255,255,255,.06); box-shadow: 0 10px 30px rgba(0,0,0,.3);
+    }
+
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .controls input[type=file] { display: none; }
+    .btn {
+      appearance: none; border: 1px solid rgba(255,255,255,.12); background: #121a24; color: var(--text);
+      padding: 10px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; letter-spacing: .2px;
+      transition: transform .03s ease, background .2s ease, border-color .2s ease;
+    }
+    .btn:hover { background: #162233; border-color: rgba(255,255,255,.18); }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: linear-gradient(180deg, #1b2a40, #162233); border-color: rgba(77,163,255,.45); }
+    .btn.ok { background: linear-gradient(180deg, #163125, #11271d); border-color: rgba(46,194,126,.5); }
+    .btn.warn { background: linear-gradient(180deg, #3d2b12, #2f220e); border-color: rgba(255,184,107,.4); }
+
+    #dropzone {
+      margin-top: 14px; padding: 24px; border-radius: 12px; outline: 2px dashed rgba(255,255,255,.15);
+      outline-offset: -6px; background: rgba(255,255,255,.02); text-align: center; color: var(--muted);
+      transition: background .2s ease, outline-color .2s ease, color .2s ease;
+    }
+    #dropzone.dragover { background: rgba(77,163,255,.08); outline-color: var(--accent); color: var(--text); }
+
+    .meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 14px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-top: 16px; }
+    .card { background: var(--panel); border: 1px solid rgba(255,255,255,.06); border-radius: 12px; overflow: clip; }
+    .thumb { aspect-ratio: 4/3; background: #0e1420; display: grid; place-items: center; }
+    .thumb img { max-width: 100%; max-height: 100%; display: block; }
+    .body { padding: 10px 12px; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; color: #c6d0dc; overflow-wrap: anywhere; }
+    .tag { font-size: 12px; color: var(--muted); }
+    .status { font-weight: 700; }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: var(--warn); }
+    .status.err { color: var(--err); }
+
+    footer { max-width: 1000px; margin: 12px auto 40px; padding: 0 16px; color: var(--muted); font-size: 13px; }
+    .small { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WebP → PNG 変換（ブラウザのみ・ローカルで完結）</h1>
+    <p class="lead">ドラッグ＆ドロップまたはファイル選択で複数の <strong>.webp</strong> をまとめて <strong>.png</strong> に変換。透過保持。アニメーションWebPは先頭フレームのみ対応。</p>
+  </header>
+
+  <section class="panel">
+    <div class="controls">
+      <label class="btn" for="picker">ファイルを選択</label>
+      <input id="picker" type="file" accept="image/webp" multiple />
+
+      <button id="btn-convert-all" class="btn primary">すべて変換</button>
+      <button id="btn-download-all" class="btn ok" title="各ファイルを連続保存します（ブラウザのポップアップ許可が必要な場合があります）">すべて保存（連続）</button>
+      <button id="btn-reset" class="btn warn">リセット</button>
+    </div>
+
+    <div id="dropzone">ここに WebP ファイルをドラッグ＆ドロップ</div>
+
+    <div class="meta" id="meta">
+      <div>読み込み：<span id="count">0</span> 件</div>
+      <div>変換成功：<span id="ok">0</span> 件</div>
+      <div>警告/スキップ：<span id="warn">0</span> 件</div>
+      <div>エラー：<span id="err">0</span> 件</div>
+    </div>
+
+    <div class="grid" id="list"></div>
+  </section>
+
+  <footer>
+    <p class="small">注：アニメーションWebPはブラウザのCanvas変換では先頭フレームのみPNG化されます。全フレームを書き出す場合は、後日 <code>ffmpeg.wasm</code> 等の重めライブラリ連携をご検討ください。</p>
+  </footer>
+
+  <script type="module">
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
+
+    const state = {
+      items: /** @type {Array<{
+        id: string,
+        file: File,
+        name: string,
+        size: number,
+        type: string,
+        width?: number,
+        height?: number,
+        animated?: boolean,
+        status: 'new'|'ok'|'warn'|'err',
+        message?: string,
+        pngBlob?: Blob,
+        pngUrl?: string,
+        thumbUrl?: string,
+      }>} */([])
+    };
+
+    const dropzone = $('#dropzone');
+    const fileInput = $('#picker');
+    const list = $('#list');
+    const countEl = $('#count');
+    const okEl = $('#ok');
+    const warnEl = $('#warn');
+    const errEl = $('#err');
+
+    fileInput.addEventListener('change', e => addFiles(fileInput.files));
+
+    ['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); dropzone.classList.add('dragover');
+    }));
+    ;['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('dragover');
+      if (ev === 'drop') addFiles(e.dataTransfer?.files);
+    }));
+
+    $('#btn-convert-all').addEventListener('click', async () => {
+      for (const it of state.items) {
+        if (it.status === 'new' || (it.status === 'warn' && !it.pngBlob)) {
+          await convertOne(it).catch(()=>{});
+          render();
+        }
+      }
+    });
+
+    $('#btn-download-all').addEventListener('click', async () => {
+      // まず未変換があれば変換
+      for (const it of state.items) {
+        if (!it.pngBlob) {
+          await convertOne(it).catch(()=>{});
+          render();
+        }
+      }
+      // 連続ダウンロード（ブラウザ設定により要許可）
+      for (const it of state.items) {
+        if (it.pngUrl) triggerDownload(it.pngUrl, toPngName(it.name));
+        await sleep(150);
+      }
+    });
+
+    $('#btn-reset').addEventListener('click', () => {
+      // revoke URLs
+      for (const it of state.items) {
+        if (it.pngUrl) URL.revokeObjectURL(it.pngUrl);
+        if (it.thumbUrl) URL.revokeObjectURL(it.thumbUrl);
+      }
+      state.items = [];
+      fileInput.value = '';
+      render();
+    });
+
+    function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+    function addFiles(fileList) {
+      if (!fileList) return;
+      const files = [...fileList].filter(f => f && /image\/webp/i.test(f.type) || /\.webp$/i.test(f.name));
+      for (const f of files) {
+        const it = {
+          id: crypto.randomUUID(),
+          file: f,
+          name: f.name,
+          size: f.size,
+          type: f.type || 'image/webp',
+          status: 'new'
+        };
+        state.items.push(it);
+        // 事前にサムネだけ用意（ObjectURL -> <img>）
+        createThumb(it).catch(()=>{});
+        // 軽くメタ取得（幅・高さ・アニメ判定）
+        sniffMeta(it).catch(()=>{}).finally(render);
+      }
+      render();
+    }
+
+    async function createThumb(it){
+      try{
+        if (it.thumbUrl) URL.revokeObjectURL(it.thumbUrl);
+        it.thumbUrl = URL.createObjectURL(it.file);
+      }catch(e){ /* no-op */ }
+    }
+
+    async function sniffMeta(it){
+      // アニメーション判定と寸法取得
+      it.animated = await isAnimatedWebP(it.file).catch(()=>false);
+      const dim = await getImageDimensions(it.file).catch(()=>null);
+      if (dim){ it.width = dim.width; it.height = dim.height; }
+      // メモリ安全チェック（超巨大キャンバスを回避）
+      const px = (it.width||0) * (it.height||0);
+      const MAX_PX = 268_435_456; // 256M px 目安
+      if (px && px > MAX_PX) {
+        it.status = 'warn';
+        it.message = `画像が大きすぎます（${it.width}×${it.height}）。分割または縮小してください。`;
+      }
+    }
+
+    async function convertOne(it){
+      try{
+        // 既に変換済みならスキップ
+        if (it.pngBlob) return it;
+
+        const { imageSource, width, height, cleanUp } = await loadImageSource(it.file);
+        it.width = width; it.height = height;
+
+        // キャンバスに描画
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(imageSource, 0, 0);
+
+        // PNGに変換
+        const blob = await new Promise((res, rej)=> canvas.toBlob(b => b? res(b) : rej(new Error('PNG化に失敗')),'image/png'));
+        it.pngBlob = blob;
+        it.pngUrl = URL.createObjectURL(blob);
+        it.status = it.animated ? 'warn' : 'ok';
+        it.message = it.animated ? 'アニメーション → 先頭フレームのみ保存' : 'OK';
+
+        cleanUp?.();
+        return it;
+      } catch (err){
+        console.error(err);
+        it.status = 'err';
+        it.message = (err && err.message) ? err.message : '変換エラー';
+        throw err;
+      }
+    }
+
+    function triggerDownload(url, filename){
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function toPngName(name){
+      return name.replace(/\.[^.]+$/,'') + '.png';
+    }
+
+    async function isAnimatedWebP(file){
+      const ab = await file.arrayBuffer();
+      // 文字列検索（簡易）。厳密にはRIFFチャンクをパースするが、実用上これでOK。
+      const ascii = new TextDecoder('ascii').decode(new Uint8Array(ab));
+      return ascii.includes('ANIM') || ascii.includes('ANMF');
+    }
+
+    async function getImageDimensions(file){
+      // createImageBitmap が速いが Safari 対応で <img> フォールバック
+      try{
+        if ('createImageBitmap' in window) {
+          const bmp = await createImageBitmap(file);
+          const dim = { width: bmp.width, height: bmp.height };
+          bmp.close();
+          return dim;
+        }
+      }catch{ /* fallback */ }
+      const url = URL.createObjectURL(file);
+      try{
+        const img = await loadHtmlImage(url);
+        return { width: img.naturalWidth, height: img.naturalHeight };
+      } finally { URL.revokeObjectURL(url); }
+    }
+
+    function loadHtmlImage(src){
+      return new Promise((res, rej)=>{
+        const img = new Image();
+        img.onload = () => res(img);
+        img.onerror = () => rej(new Error('画像の読み込みに失敗'));
+        img.src = src;
+      });
+    }
+
+    async function loadImageSource(file){
+      // 変換用に ImageBitmap（高速）→ ダメなら <img>
+      if ('createImageBitmap' in window) {
+        try{
+          const bmp = await createImageBitmap(file);
+          return {
+            imageSource: bmp,
+            width: bmp.width,
+            height: bmp.height,
+            cleanUp(){ bmp.close(); }
+          };
+        }catch{ /* fallback */ }
+      }
+      const url = URL.createObjectURL(file);
+      const img = await loadHtmlImage(url);
+      return {
+        imageSource: img,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        cleanUp(){ URL.revokeObjectURL(url); }
+      };
+    }
+
+    function fmtBytes(n){
+      if (n === 0) return '0B';
+      const u = ['B','KB','MB','GB'];
+      const i = Math.floor(Math.log(n)/Math.log(1024));
+      return (n/Math.pow(1024,i)).toFixed(1) + u[i];
+    }
+
+    function render(){
+      countEl.textContent = String(state.items.length);
+      okEl.textContent = String(state.items.filter(i=>i.status==='ok').length);
+      warnEl.textContent = String(state.items.filter(i=>i.status==='warn').length);
+      errEl.textContent = String(state.items.filter(i=>i.status==='err').length);
+
+      list.innerHTML = '';
+      for (const it of state.items) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="thumb">${it.thumbUrl ? `<img alt="thumb" src="${it.thumbUrl}">` : '<span class="tag">thumb...</span>'}</div>
+          <div class="body">
+            <div class="row"><span class="mono">${escapeHtml(it.name)}</span><span class="tag">${fmtBytes(it.size)}</span></div>
+            <div class="row"><span class="tag">${it.width? it.width+'×'+it.height : '---'}</span><span class="tag">${it.animated ? 'アニメーション' : '静止画'}</span></div>
+            <div class="row">
+              <span class="status ${it.status}">${statusLabel(it)}</span>
+              <div style="display:flex; gap:6px;">
+                <button class="btn" data-act="convert">変換</button>
+                <button class="btn" data-act="download" ${it.pngUrl? '' : 'disabled'}>保存</button>
+              </div>
+            </div>
+            ${it.message? `<div class="small" style="margin-top:6px;">${escapeHtml(it.message)}</div>` : ''}
+          </div>
+        `;
+        card.querySelector('[data-act="convert"]').addEventListener('click', async () => {
+          await convertOne(it).catch(()=>{}); render();
+        });
+        const dl = card.querySelector('[data-act="download"]');
+        dl.addEventListener('click', () => {
+          if (it.pngUrl) triggerDownload(it.pngUrl, toPngName(it.name));
+        });
+        list.appendChild(card);
+      }
+    }
+
+    function statusLabel(it){
+      switch(it.status){
+        case 'ok': return 'OK';
+        case 'warn': return it.message || '警告';
+        case 'err': return it.message || 'エラー';
+        default: return '未変換';
+      }
+    }
+
+    function escapeHtml(s){
+      return s.replace(/[&<>"]+/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+    }
+
+    // 初期レンダリング
+    render();
+  </script>
+</body>
+</html>
